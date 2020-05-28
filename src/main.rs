@@ -18,8 +18,9 @@ struct QueryRoot;
 
 #[async_graphql::Object]
 impl QueryRoot {
-    async fn page<'a>(&self, _ctx: &'a Context<'_>, path: &str) -> Page {
-        Page { path }
+    async fn page(&self, ctx: &Context<'_>) -> Page {
+        let path = "";
+        Page { path: path.to_owned() }
     }
 }
 
@@ -37,7 +38,6 @@ impl Page {
 
 struct AppState {
     schema: Schema<QueryRoot, EmptyMutation, EmptySubscription>,
-    repo: git2::Repository,
 }
 
 fn main() -> Result<()> {
@@ -52,21 +52,14 @@ async fn run() -> Result<()> {
 
     println!("Playground: http://{}", listen_addr);
 
-    let repo = git::get_repo("repo");
-
-    let app_state = AppState { schema, repo };
+    let app_state = AppState { schema };
     let mut app = tide::with_state(app_state);
 
     async fn graphql(req: Request<AppState>) -> tide::Result<Response> {
         let schema = req.state().schema.clone();
-        let token = &req
-            .header(&"token".parse().unwrap())
-            .and_then(|values| values.first().map(|value| value.to_string()));
 
         async_graphql_tide::graphql(req, schema, |mut query_builder| {
-            if let Some(token) = token {
-                query_builder = query_builder.data(Repo::new(git::get_repo("repo").expect("no repo")));
-            }
+            query_builder = query_builder.data(Repo::new(git::get_repo("repo").expect("no repo")));
             query_builder
         })
         .await

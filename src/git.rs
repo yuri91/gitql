@@ -1,6 +1,6 @@
 use git2::{Repository, Signature};
 use log::info;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use slug::slugify;
 
 pub use git2::Error;
@@ -11,6 +11,12 @@ pub fn get_repo(path: &str) -> Result<Repository> {
         info!("Creating bare repo at {}", path);
         Repository::init_bare(path)
     })
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Metadata {
+    pub title: String,
+    pub link: String,
 }
 
 pub fn get_file(path: &str, repo: &Repository) -> Result<String> {
