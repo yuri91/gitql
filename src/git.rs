@@ -16,7 +16,7 @@ pub fn get_repo(path: &str) -> Result<Repository> {
 #[derive(Deserialize, Serialize)]
 pub struct Metadata {
     pub title: String,
-    pub link: String,
+    pub path: String,
 }
 
 pub fn get_file(path: &str, repo: &Repository) -> Result<String> {
@@ -24,6 +24,17 @@ pub fn get_file(path: &str, repo: &Repository) -> Result<String> {
     let blob = obj.peel_to_blob()?;
     let content = std::str::from_utf8(blob.content()).expect("not utf8");
     Ok(content.to_owned())
+}
+pub fn get_dir(path: &str, repo: &Repository) -> Result<Vec<String>> {
+    let obj = repo.revparse_single(&format!("master:{}", path))?;
+    let tree = obj.peel_to_tree()?;
+    Ok(tree
+        .iter()
+        .map(|e| {
+            e.name().map(|s| s.to_owned())
+        })
+        .filter_map(|e| e)
+        .collect())
 }
 pub fn list_files(path: &str, repo: &Repository) -> Result<Vec<Metadata>> {
     let obj = repo.revparse_single(&format!("master:meta{}", path))?;

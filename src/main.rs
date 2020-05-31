@@ -12,15 +12,17 @@ type Repo = async_std::sync::Mutex<git2::Repository>;
 
 mod git;
 
-struct MyToken(String);
-
 struct QueryRoot;
 
 #[async_graphql::Object]
 impl QueryRoot {
-    async fn page(&self, ctx: &Context<'_>) -> Page {
-        let path = "";
-        Page { path: path.to_owned() }
+    async fn page(&self, _ctx: &Context<'_>, path: String) -> Page {
+        Page { path }
+    }
+    async fn pages(&self, ctx: &Context<'_>) -> Vec<Page> {
+        let repo = ctx.data::<Repo>().lock().await;
+        let paths = git::get_dir("", &repo).expect("error page");
+        paths.into_iter().map(|path| Page { path }).collect()
     }
 }
 
@@ -30,6 +32,9 @@ struct Page {
 
 #[async_graphql::Object]
 impl Page {
+    async fn path(&self) -> String {
+        self.path.clone()
+    }
     async fn content<'a>(&self, ctx: &'a Context<'_>) -> String {
         let repo = ctx.data::<Repo>().lock().await;
         git::get_file(&self.path, &repo).expect("error page")
