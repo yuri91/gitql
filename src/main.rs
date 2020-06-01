@@ -21,7 +21,7 @@ impl QueryRoot {
     }
     async fn pages(&self, ctx: &Context<'_>) -> Vec<Page> {
         let repo = ctx.data::<Repo>().lock().await;
-        let paths = git::get_dir("", &repo).expect("error page");
+        let paths = git::get_dir("files", &repo).expect("error page");
         paths.into_iter().map(|path| Page { path }).collect()
     }
 }
@@ -31,13 +31,25 @@ struct Page {
 }
 
 #[async_graphql::Object]
-impl Page {
+impl git::Metadata {
+    async fn title(&self) -> String {
+        self.title.clone()
+    }
     async fn path(&self) -> String {
         self.path.clone()
     }
+}
+
+#[async_graphql::Object]
+impl Page {
     async fn content<'a>(&self, ctx: &'a Context<'_>) -> String {
         let repo = ctx.data::<Repo>().lock().await;
-        git::get_file(&self.path, &repo).expect("error page")
+        git::get_file(&format!("files/{}",&self.path), &repo).expect("error page")
+    }
+    async fn meta<'a>(&self, ctx: &'a Context<'_>) -> git::Metadata {
+        let repo = ctx.data::<Repo>().lock().await;
+        let content = git::get_file(&format!("meta/{}.json", &self.path), &repo).expect("error page");
+        serde_json::from_str(&content).expect("not valid json")
     }
 }
 
