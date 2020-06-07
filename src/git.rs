@@ -13,12 +13,6 @@ pub fn get_repo(path: &str) -> Result<Repository> {
     })
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct Metadata {
-    pub title: String,
-    pub path: String,
-}
-
 pub fn get_file(path: &str, repo: &Repository) -> Result<String> {
     let obj = repo.revparse_single(&format!("master:{}", path))?;
     let blob = obj.peel_to_blob()?;
@@ -36,77 +30,114 @@ pub fn get_dir(path: &str, repo: &Repository) -> Result<Vec<String>> {
         .filter_map(|e| e)
         .collect())
 }
-pub fn list_files(path: &str, repo: &Repository) -> Result<Vec<Metadata>> {
-    let obj = repo.revparse_single(&format!("master:meta{}", path))?;
-    let tree = obj.peel_to_tree()?;
-    Ok(tree
-        .iter()
-        .map(|e| {
-            e.to_object(&repo).and_then(|o| o.peel_to_blob()).map(|b| {
-                serde_json::from_str(std::str::from_utf8(b.content()).expect("not utf8"))
-                    .expect("not json")
-            })
-        })
-        .filter_map(Result::ok)
-        .collect())
+
+#[async_graphql::InputObject]
+pub struct CommitInfo {
+    pub message: String,
+    pub author: String,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct CommitInfo {
+#[async_graphql::InputObject]
+pub struct StagedFile {
     pub content: String,
-    pub title: String,
+    pub path: String,
 }
-fn transpose<T, E>(o: Option<std::result::Result<T, E>>) -> std::result::Result<Option<T>, E> {
-    match o {
-        Some(Ok(x)) => Ok(Some(x)),
-        Some(Err(e)) => Err(e),
-        None => Ok(None),
+
+pub fn commit_files(info: &CommitInfo, updated_files: &[StagedFile], removed_files: &[String], repo: &Repository) -> Result<()> {
+    let obj = repo.revparse_single("master:")?;
+    let mut tree = obj.peel_to_tree()?;
+
+    for f in updated_files {
+        tree = stage_file(f, &tree, repo)?;
     }
+
+    for f in removed_files {
+        tree = remove_file(f, &tree, repo)?;
+    }
+
+    let sig = Signature::now(&info.author, &format!("{}@peori.space", info.author))?;
+    let branch = repo.find_branch("master", git2::BranchType::Local)?;
+    repo.commit(
+        branch.get().name(),
+        &sig,
+        &sig,
+        &info.message,
+        &tree,
+        &[&branch.get().peel_to_commit()?],
+    )?;
+
+    Ok(())
 }
-//pub fn page_committer(author: String, info: CommitInfo, repo_path: &str) -> Result<String> {
-//    let link = slugify(&info.title);
-//    let repo = get_repo(&repo_path)?;
-//
-//    let obj = repo.revparse_single("master:")?;
-//    let tree = obj.peel_to_tree()?;
-//
-//    let mut treebuilder = repo.treebuilder(Some(&tree))?;
-//    let blob = repo.blob(info.content.as_bytes())?;
-//    treebuilder.insert(&format!("{}.md", link), blob, 0o100_644)?;
-//
-//    let meta = super::page::Metadata {
-//        title: info.title,
-//        link,
-//    };
-//    let blob = repo.blob(
-//        serde_json::to_string(&meta)
-//            .expect("cannot serialize")
-//            .as_bytes(),
-//    )?;
-//    let mut metatreebuilder = repo.treebuilder(
-//        transpose(
-//            tree.get_name("meta")
-//                .map(|t| t.to_object(&repo).and_then(|t| t.peel_to_tree())),
-//        )?
-//        .as_ref(),
-//    )?;
-//    metatreebuilder.insert(&format!("{}.json", meta.link), blob, 0o100_644)?;
-//    let oid = metatreebuilder.write()?;
-//    treebuilder.insert("meta", oid, 0o040_000)?;
-//
-//    let oid = treebuilder.write()?;
-//    let newtree = repo.find_tree(oid)?;
-//
-//    let sig = Signature::now(&author, &format!("{}@peori.space", author))?;
-//    let branch = repo.find_branch("master", git2::BranchType::Local)?;
-//    repo.commit(
-//        branch.get().name(),
-//        &sig,
-//        &sig,
-//        "Edited from web interface",
-//        &newtree,
-//        &[&branch.get().peel_to_commit()?],
-//    )?;
-//
-//    Ok(meta.link)
-//}
+
+fn dump_tree(tree: &git2::Tree<'_>)
+{
+    println!("dumping tree -------------- \n");
+    tree.walk(git2::TreeWalkMode::PreOrder, |s, e| {
+        println!("entry: s={}, e={:?}", s, e.name());
+        git2::TreeWalkResult::Ok
+    }).unwrap();
+    println!("-------------- \n");
+}
+
+fn stage_file<'a>(file: &StagedFile, tree: &git2::Tree<'a>, repo: &'a Repository) -> Result<git2::Tree<'a>> {
+    let blob = repo.blob(file.content.as_bytes())?;
+
+    let path = std::path::Path::new(&file.path);
+    let mut oid = blob;
+    let mut mode = 0o100_644;
+    let mut name = path.file_name().expect("no filename");
+    for comp in path.ancestors().skip(1) {
+        let dirtree = if comp.file_name().is_none() {
+            Some(tree.clone())
+        } else if let Ok(entry) = tree.get_path(comp) {
+            Some(entry.to_object(&repo).and_then(|t| t.peel_to_tree())?)
+        } else {
+            None
+        };
+        let mut builder = repo.treebuilder(dirtree.as_ref())?;
+        builder.insert(name, oid, mode)?;
+        oid = builder.write()?;
+        name = if let Some(name) = comp.file_name() {
+            name
+        } else {
+            break;
+        };
+        mode = 0o040_000;
+    }
+
+    let tree = repo.find_tree(oid)?;
+    Ok(tree)
+}
+
+fn remove_file<'a>(file: &str, tree: &git2::Tree<'a>, repo: &'a Repository) -> Result<git2::Tree<'a>> {
+
+    let path = std::path::Path::new(file);
+    let parent_path = path.parent().expect("no parent");
+    let parent_tree = tree.get_path(parent_path)?;
+    let mut builder = repo.treebuilder(Some(&parent_tree.to_object(&repo).and_then(|t| t.peel_to_tree())?))?;
+    let name = path.file_name().expect("no file name");
+    builder.remove(name)?;
+    let mut oid = builder.write()?;
+
+    let mut name = parent_path.file_name().expect("no parent name");
+    for comp in path.ancestors().skip(2) {
+        let dirtree = if comp.file_name().is_none() {
+            Some(tree.clone())
+        } else if let Ok(entry) = tree.get_path(comp) {
+            Some(entry.to_object(&repo).and_then(|t| t.peel_to_tree())?)
+        } else {
+            None
+        };
+        let mut builder = repo.treebuilder(dirtree.as_ref())?;
+        builder.insert(name, oid, 0o040_000)?;
+        oid = builder.write()?;
+        name = if let Some(name) = comp.file_name() {
+            name
+        } else {
+            break;
+        };
+    }
+
+    let tree = repo.find_tree(oid)?;
+    Ok(tree)
+}
