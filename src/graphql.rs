@@ -1,5 +1,5 @@
-use async_graphql::{Context, FieldResult};
 use crate::git;
+use async_graphql::{Context, FieldResult};
 
 use serde_derive::{Deserialize, Serialize};
 
@@ -43,7 +43,7 @@ impl Metadata {
 impl Page {
     async fn content<'a>(&self, ctx: &'a Context<'_>) -> FieldResult<String> {
         let repo = ctx.data::<Repo>().lock().await;
-        Ok(git::get_file(&format!("files/{}",&self.path), &repo)?)
+        Ok(git::get_file(&format!("files/{}", &self.path), &repo)?)
     }
     async fn meta<'a>(&self, ctx: &'a Context<'_>) -> FieldResult<Metadata> {
         let repo = ctx.data::<Repo>().lock().await;
@@ -56,7 +56,13 @@ pub struct MutationRoot;
 
 #[async_graphql::Object]
 impl MutationRoot {
-    async fn commit(&self, ctx: &Context<'_>, info: git::CommitInfo, updated_files: Vec<git::StagedFile>, removed_files: Vec<String>) -> FieldResult<bool> {
+    async fn commit(
+        &self,
+        ctx: &Context<'_>,
+        info: git::CommitInfo,
+        updated_files: Vec<git::StagedFile>,
+        removed_files: Vec<String>,
+    ) -> FieldResult<bool> {
         let repo = ctx.data::<Repo>().lock().await;
         git::commit_files(&info, &updated_files, &removed_files, &repo)?;
         Ok(true)

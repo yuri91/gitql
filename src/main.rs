@@ -11,7 +11,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 mod git;
 mod graphql;
 
-use graphql::{Repo, QueryRoot, MutationRoot};
+use graphql::{MutationRoot, QueryRoot, Repo};
 
 struct AppState {
     schema: Schema<QueryRoot, MutationRoot, EmptySubscription>,

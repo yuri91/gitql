@@ -22,9 +22,7 @@ pub fn get_dir(path: &str, repo: &Repository) -> Result<Vec<String>> {
     let tree = obj.peel_to_tree()?;
     Ok(tree
         .iter()
-        .map(|e| {
-            e.name().map(|s| s.to_owned())
-        })
+        .map(|e| e.name().map(|s| s.to_owned()))
         .filter_map(|e| e)
         .collect())
 }
@@ -41,7 +39,12 @@ pub struct StagedFile {
     pub path: String,
 }
 
-pub fn commit_files(info: &CommitInfo, updated_files: &[StagedFile], removed_files: &[String], repo: &Repository) -> Result<()> {
+pub fn commit_files(
+    info: &CommitInfo,
+    updated_files: &[StagedFile],
+    removed_files: &[String],
+    repo: &Repository,
+) -> Result<()> {
     let obj = repo.revparse_single("master:")?;
     let mut tree = obj.peel_to_tree()?;
 
@@ -67,7 +70,11 @@ pub fn commit_files(info: &CommitInfo, updated_files: &[StagedFile], removed_fil
     Ok(())
 }
 
-fn stage_file<'a>(file: &StagedFile, tree: &git2::Tree<'a>, repo: &'a Repository) -> Result<git2::Tree<'a>> {
+fn stage_file<'a>(
+    file: &StagedFile,
+    tree: &git2::Tree<'a>,
+    repo: &'a Repository,
+) -> Result<git2::Tree<'a>> {
     let blob = repo.blob(file.content.as_bytes())?;
 
     let path = std::path::Path::new(&file.path);
@@ -97,12 +104,19 @@ fn stage_file<'a>(file: &StagedFile, tree: &git2::Tree<'a>, repo: &'a Repository
     Ok(tree)
 }
 
-fn remove_file<'a>(file: &str, tree: &git2::Tree<'a>, repo: &'a Repository) -> Result<git2::Tree<'a>> {
-
+fn remove_file<'a>(
+    file: &str,
+    tree: &git2::Tree<'a>,
+    repo: &'a Repository,
+) -> Result<git2::Tree<'a>> {
     let path = std::path::Path::new(file);
     let parent_path = path.parent().expect("no parent");
     let parent_tree = tree.get_path(parent_path)?;
-    let mut builder = repo.treebuilder(Some(&parent_tree.to_object(&repo).and_then(|t| t.peel_to_tree())?))?;
+    let mut builder = repo.treebuilder(Some(
+        &parent_tree
+            .to_object(&repo)
+            .and_then(|t| t.peel_to_tree())?,
+    ))?;
     let name = path.file_name().expect("no file name");
     builder.remove(name)?;
     let mut oid = builder.write()?;
