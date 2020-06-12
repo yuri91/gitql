@@ -54,16 +54,50 @@ impl Page {
 
 pub struct MutationRoot;
 
+#[async_graphql::InputObject]
+struct PageUpdate {
+    content: String,
+    title: String,
+    path: String,
+}
+
 #[async_graphql::Object]
 impl MutationRoot {
     async fn commit(
         &self,
         ctx: &Context<'_>,
-        info: git::CommitInfo,
-        updated_files: Vec<git::StagedFile>,
-        removed_files: Vec<String>,
+        message: String,
+        updated: Vec<PageUpdate>,
+        removed: Vec<String>,
     ) -> FieldResult<bool> {
         let repo = ctx.data::<Repo>().lock().await;
+        let info = git::CommitInfo {
+            message,
+            author: "test@peori.space".to_owned(),
+        };
+        let updated_files = updated
+            .into_iter()
+            .flat_map(|pu| {
+                vec![
+                    git::StagedFile {
+                        content: pu.content.clone(),
+                        path: format!("files/{}", pu.path),
+                    },
+                    git::StagedFile {
+                        path: format!("meta/{}.json", pu.path),
+                        content: serde_json::to_string(&Metadata {
+                            title: pu.title,
+                            path: pu.path,
+                        })
+                        .expect("cannot serialize"),
+                    },
+                ]
+            })
+            .collect::<Vec<git::StagedFile>>();
+        let removed_files = removed
+            .into_iter()
+            .flat_map(|r| vec![format!("files/{}", r), format!("meta/{}.json", r)])
+            .collect::<Vec<String>>();
         git::commit_files(&info, &updated_files, &removed_files, &repo)?;
         Ok(true)
     }
