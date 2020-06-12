@@ -12,10 +12,10 @@ impl QueryRoot {
     async fn page(&self, _ctx: &Context<'_>, path: String) -> Page {
         Page { path }
     }
-    async fn pages(&self, ctx: &Context<'_>) -> Vec<Page> {
+    async fn pages(&self, ctx: &Context<'_>) -> FieldResult<Vec<Page>> {
         let repo = ctx.data::<Repo>().lock().await;
-        let paths = git::get_dir("files", &repo).expect("error page");
-        paths.into_iter().map(|path| Page { path }).collect()
+        let paths = git::get_dir("files", &repo)?;
+        Ok(paths.into_iter().map(|path| Page { path }).collect())
     }
 }
 
