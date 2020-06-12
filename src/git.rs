@@ -1,7 +1,5 @@
 use git2::{Repository, Signature};
 use log::info;
-use serde_derive::{Deserialize, Serialize};
-use slug::slugify;
 
 pub use git2::Error;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -67,16 +65,6 @@ pub fn commit_files(info: &CommitInfo, updated_files: &[StagedFile], removed_fil
     )?;
 
     Ok(())
-}
-
-fn dump_tree(tree: &git2::Tree<'_>)
-{
-    println!("dumping tree -------------- \n");
-    tree.walk(git2::TreeWalkMode::PreOrder, |s, e| {
-        println!("entry: s={}, e={:?}", s, e.name());
-        git2::TreeWalkResult::Ok
-    }).unwrap();
-    println!("-------------- \n");
 }
 
 fn stage_file<'a>(file: &StagedFile, tree: &git2::Tree<'a>, repo: &'a Repository) -> Result<git2::Tree<'a>> {
