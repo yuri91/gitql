@@ -31,9 +31,10 @@ pub fn get_dir(path: &str, repo: &Repository) -> Result<Vec<String>> {
 pub struct CommitInfo {
     pub message: String,
     pub author: String,
+    pub email: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 pub struct StagedFile {
     pub content: String,
     pub path: String,
@@ -56,7 +57,7 @@ pub fn commit_files(
         tree = remove_file(f, &tree, repo)?;
     }
 
-    let sig = Signature::now(&info.author, &format!("{}@peori.space", info.author))?;
+    let sig = Signature::now(&info.author, &info.email)?;
     let branch = repo.find_branch("master", git2::BranchType::Local)?;
     repo.commit(
         branch.get().name(),

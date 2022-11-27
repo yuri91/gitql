@@ -1,8 +1,11 @@
 use std::sync::{Arc, Mutex};
 use axum::{
     routing::{get, post},
-    extract::{State, Path, Json},
-    Router, response::IntoResponse, http::StatusCode,
+    extract::{State, Path, Json, Extension},
+    Router,
+    response::{IntoResponse, Response},
+    http::{StatusCode, Request},
+    middleware::{Next, self},
 };
 
 mod git;
@@ -27,6 +30,30 @@ impl IntoResponse for AppError {
 
 type AppResult<T> = Result<T, AppError>;
 
+#[derive(Clone)]
+struct UserInfo {
+    user: String,
+    email: String,
+}
+
+async fn auth<B>(mut req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
+    let remote_user = req.headers()
+        .get("RemoteUser")
+        .and_then(|header| header.to_str().ok()).map(|s| s.to_owned());
+    let remote_email = req.headers()
+        .get("RemoteEmail")
+        .and_then(|header| header.to_str().ok()).map(|s| s.to_owned());
+
+    match (remote_user, remote_email) {
+        (Some(user), Some(email)) => {
+
+            req.extensions_mut().insert(UserInfo{user, email});
+            Ok(next.run(req).await)
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
 async fn fetch_file(State(state): State<AppState>, Path(path): Path<String>) -> AppResult<String> {
     let repo = state.repo.lock().expect("cannot lock mutex");
     let f = git::get_file(&path, &repo)?;
@@ -40,23 +67,28 @@ async fn fetch_dir(State(state): State<AppState>, Path(path): Path<String>) -> A
     Ok(res)
 }
 
-async fn fetch_root(State(state): State<AppState>) -> AppResult<String> {
+async fn fetch_root(State(state): State<AppState>, Extension(user_info): Extension<UserInfo>) -> AppResult<String> {
     let repo = state.repo.lock().expect("cannot lock mutex");
     let d = git::get_dir("", &repo)?;
     let res = d.join("\n");
     Ok(res)
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 struct Commit {
-    info: git::CommitInfo,
+    message: String,
     added: Vec<git::StagedFile>,
     removed: Vec<String>,
 }
 
-async fn commit(State(state): State<AppState>, Json(data): Json<Commit>) -> AppResult<()> {
+async fn commit(State(state): State<AppState>, Extension(user_info): Extension<UserInfo>, Json(data): Json<Commit>) -> AppResult<()> {
     let repo = state.repo.lock().expect("cannot lock mutex");
-    git::commit_files(&data.info, &data.added, &data.removed, &repo)?;
+    let info = git::CommitInfo {
+        message: data.message,
+        author: user_info.user,
+        email: user_info.email,
+    };
+    git::commit_files(&info, &data.added, &data.removed, &repo)?;
     Ok(())
 }
 
@@ -71,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/fetch_dir/*path", get(fetch_dir))
         .route("/fetch_dir/", get(fetch_root))
         .route("/commit", post(commit))
+        .layer(middleware::from_fn(auth))
         .with_state(state);
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
