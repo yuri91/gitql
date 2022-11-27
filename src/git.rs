@@ -1,5 +1,5 @@
 use git2::{Repository, Signature};
-use log::info;
+use tracing::info;
 
 pub use git2::Error;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -27,13 +27,13 @@ pub fn get_dir(path: &str, repo: &Repository) -> Result<Vec<String>> {
         .collect())
 }
 
-#[async_graphql::InputObject]
+#[derive(serde::Deserialize)]
 pub struct CommitInfo {
     pub message: String,
     pub author: String,
 }
 
-#[async_graphql::InputObject]
+#[derive(serde::Deserialize)]
 pub struct StagedFile {
     pub content: String,
     pub path: String,

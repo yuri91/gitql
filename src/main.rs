@@ -1,57 +1,82 @@
-use async_graphql::http::playground_source;
-use async_graphql::{EmptySubscription, Schema};
-use async_std::task;
-use std::env;
-use tide::{
-    http::{headers, mime},
-    Request, Response, StatusCode,
+use std::sync::{Arc, Mutex};
+use axum::{
+    routing::{get, post},
+    extract::{State, Path, Json},
+    Router, response::IntoResponse, http::StatusCode,
 };
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 mod git;
-mod graphql;
 
-use graphql::{MutationRoot, QueryRoot, Repo};
-
+#[derive(Clone)]
 struct AppState {
-    schema: Schema<QueryRoot, MutationRoot, EmptySubscription>,
+    repo: Arc<Mutex<git2::Repository>>,
 }
 
-fn main() -> Result<()> {
-    pretty_env_logger::init();
-    task::block_on(run())
+#[derive(thiserror::Error, Debug)]
+enum AppError {
+    #[error("git error")]
+    Git(#[from] git::Error),
 }
 
-async fn run() -> Result<()> {
-    let listen_addr = env::var("LISTEN_ADDR").unwrap_or_else(|_| "localhost:8000".to_owned());
-
-    let schema = Schema::build(QueryRoot, MutationRoot, EmptySubscription).finish();
-
-    println!("Playground: http://{}", listen_addr);
-
-    let app_state = AppState { schema };
-    let mut app = tide::with_state(app_state);
-
-    async fn graphql(req: Request<AppState>) -> tide::Result<Response> {
-        let schema = req.state().schema.clone();
-
-        async_graphql_tide::graphql(req, schema, |mut query_builder| {
-            query_builder = query_builder.data(Repo::new(git::get_repo("repo").expect("no repo")));
-            query_builder
-        })
-        .await
+impl IntoResponse for AppError {
+    fn into_response(self) -> axum::response::Response {
+        let err = format!("Server error: {}", self);
+        (StatusCode::INTERNAL_SERVER_ERROR, err).into_response()
     }
+}
 
-    app.at("/graphql").post(graphql).get(graphql);
-    app.at("/").get(|_| async move {
-        let resp = Response::new(StatusCode::Ok)
-            .body_string(playground_source("/graphql", None))
-            .set_header(headers::CONTENT_TYPE, mime::HTML.to_string());
+type AppResult<T> = Result<T, AppError>;
 
-        Ok(resp)
-    });
+async fn fetch_file(State(state): State<AppState>, Path(path): Path<String>) -> AppResult<String> {
+    let repo = state.repo.lock().expect("cannot lock mutex");
+    let f = git::get_file(&path, &repo)?;
+    Ok(f)
+}
 
-    app.listen(listen_addr).await?;
+async fn fetch_dir(State(state): State<AppState>, Path(path): Path<String>) -> AppResult<String> {
+    let repo = state.repo.lock().expect("cannot lock mutex");
+    let d = git::get_dir(&path, &repo)?;
+    let res = d.join("\n");
+    Ok(res)
+}
+
+async fn fetch_root(State(state): State<AppState>) -> AppResult<String> {
+    let repo = state.repo.lock().expect("cannot lock mutex");
+    let d = git::get_dir("", &repo)?;
+    let res = d.join("\n");
+    Ok(res)
+}
+
+#[derive(serde::Deserialize)]
+struct Commit {
+    info: git::CommitInfo,
+    added: Vec<git::StagedFile>,
+    removed: Vec<String>,
+}
+
+async fn commit(State(state): State<AppState>, Json(data): Json<Commit>) -> AppResult<()> {
+    let repo = state.repo.lock().expect("cannot lock mutex");
+    git::commit_files(&data.info, &data.added, &data.removed, &repo)?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let state = AppState {
+        repo: Arc::new(Mutex::new(git::get_repo("repo")?)),
+    };
+
+    let app = Router::new()
+        .route("/fetch_file/*path", get(fetch_file))
+        .route("/fetch_dir/*path", get(fetch_dir))
+        .route("/fetch_dir/", get(fetch_root))
+        .route("/commit", post(commit))
+        .with_state(state);
+
+    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 
     Ok(())
 }
