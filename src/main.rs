@@ -38,10 +38,10 @@ struct UserInfo {
 
 async fn auth<B>(mut req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
     let remote_user = req.headers()
-        .get("RemoteUser")
+        .get("Remote-User")
         .and_then(|header| header.to_str().ok()).map(|s| s.to_owned());
     let remote_email = req.headers()
-        .get("RemoteEmail")
+        .get("Remote-Email")
         .and_then(|header| header.to_str().ok()).map(|s| s.to_owned());
 
     match (remote_user, remote_email) {
