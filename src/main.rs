@@ -60,16 +60,10 @@ async fn fetch_file(State(state): State<AppState>, Path(path): Path<String>) -> 
     Ok(f)
 }
 
-async fn fetch_dir(State(state): State<AppState>, Path(path): Path<String>) -> AppResult<String> {
+async fn fetch_dir(State(state): State<AppState>, path: Option<Path<String>>) -> AppResult<String> {
     let repo = state.repo.lock().expect("cannot lock mutex");
-    let d = git::get_dir(&path, &repo)?;
-    let res = d.join("\n");
-    Ok(res)
-}
-
-async fn fetch_root(State(state): State<AppState>, Extension(user_info): Extension<UserInfo>) -> AppResult<String> {
-    let repo = state.repo.lock().expect("cannot lock mutex");
-    let d = git::get_dir("", &repo)?;
+    let p = path.as_deref().map(|s| s.as_str()).unwrap_or("");
+    let d = git::get_dir(p, &repo)?;
     let res = d.join("\n");
     Ok(res)
 }
@@ -99,9 +93,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/fetch_file/*path", get(fetch_file))
+        .route("/fetch_dir/", get(fetch_dir))
         .route("/fetch_dir/*path", get(fetch_dir))
-        .route("/fetch_dir/", get(fetch_root))
+        .route("/fetch_file/*path", get(fetch_file))
         .route("/commit", post(commit))
         .layer(middleware::from_fn(auth))
         .with_state(state);
