@@ -17,7 +17,7 @@ struct AppState {
 
 #[derive(thiserror::Error, Debug)]
 enum AppError {
-    #[error("git error")]
+    #[error("git error: {0}")]
     Git(#[from] git::Error),
 }
 
