@@ -11,6 +11,8 @@ use clap::{
     Parser,
     command,
 };
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tower_http::trace::TraceLayer;
 
 mod git;
 
@@ -103,6 +105,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG")
+                .unwrap_or_else(|_| "gitql=info,tower_http=debug".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let args = Args::parse();
 
     let state = AppState {
@@ -115,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/fetch_file/*path", get(fetch_file))
         .route("/commit", post(commit))
         .layer(middleware::from_fn(auth))
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     axum::Server::bind(&args.listen.parse().unwrap())
