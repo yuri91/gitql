@@ -7,6 +7,10 @@ use axum::{
     http::{StatusCode, Request},
     middleware::{Next, self},
 };
+use clap::{
+    Parser,
+    command,
+};
 
 mod git;
 
@@ -86,10 +90,23 @@ async fn commit(State(state): State<AppState>, Extension(user_info): Extension<U
     Ok(())
 }
 
+#[derive(Parser)]
+#[command(author, version, about)]
+struct Args {
+    // Address and port to bind to
+    #[arg(short, long, default_value = "[::]:9879")]
+    listen: String,
+    // Repo to serve
+    #[arg(short, long, default_value = "repo")]
+    repo: String,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
     let state = AppState {
-        repo: Arc::new(Mutex::new(git::get_repo("repo")?)),
+        repo: Arc::new(Mutex::new(git::get_repo(&args.repo)?)),
     };
 
     let app = Router::new()
@@ -100,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(middleware::from_fn(auth))
         .with_state(state);
 
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+    axum::Server::bind(&args.listen.parse().unwrap())
         .serve(app.into_make_service())
         .await
         .unwrap();
